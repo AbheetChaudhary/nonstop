@@ -1,6 +1,6 @@
 Learning about concurrent data structures programming and challenges by making some.
 
-Currently available:
+Currently available(Linux only):
 
 - [x] `Arc`(atomic reference counting)
 - [x] `SpinLock` (guarding exclusive access in a thread safe way)
@@ -11,14 +11,15 @@ Currently available:
 - [ ] Concurrent linked lists and queues.
 
 ## Viewing Docs
-If comfortable, then one could directly navigate the source code. It's quite well
-commented.
+If comfortable, then one could directly navigate the source code. I have tried to
+keep it well commented.
 
-In order to generate HTML docs, run:
+To generate HTML docs, run:
 
 ```shell
 cargo doc
 ```
+Then open the HTML file in your browser.
 
 ## NOTE
 This repository is only for learning purposes.

@@ -1,4 +1,4 @@
-use crate::BeginCacheLine;
+use crate::CacheLine;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::cell::UnsafeCell;
@@ -17,7 +17,7 @@ pub struct SpinLock<T> {
     // false sharing between the lock holding
     // thread that accesses the data and other
     // spinning threads.
-    locked: BeginCacheLine<AtomicBool>, 
+    locked: CacheLine<AtomicBool>, 
 
 }
 
@@ -48,7 +48,7 @@ impl<T> SpinLock<T> {
     /// in a thread-safe way.
     pub fn new(value: T) -> Self {
         Self {
-            locked: BeginCacheLine(AtomicBool::new(false)),
+            locked: CacheLine(AtomicBool::new(false)),
             data:   UnsafeCell::new(value),
         }
     }

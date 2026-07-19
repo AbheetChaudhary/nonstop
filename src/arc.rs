@@ -1,4 +1,4 @@
-use crate::BeginCacheLine;
+use crate::CacheLine;
 
 extern crate alloc;
 
@@ -17,12 +17,12 @@ struct Inner<T> {
     // The number of `Arc`s currently sharing the ownership of the value. If
     // this number goes to zero then the value gets dropped, but not the
     // allocation of `Inner`.
-    strong_count: BeginCacheLine<AtomicUsize>,
+    strong_count: CacheLine<AtomicUsize>,
 
     // The number of `Weak`s currently alive. As long as any one of them is
     // alive then the allocation of `Inner` stays alive. If any `Arc` is alive
     // too then a `Weak` could be upgraded.
-    weak_count:   BeginCacheLine<AtomicUsize>,
+    weak_count:   CacheLine<AtomicUsize>,
 }
 
 /// A weak reference pointer that might be upgradable to a strong reference
@@ -206,8 +206,8 @@ impl<T> Arc<T> {
     pub fn new(val: T) -> Self {
         let inner = Inner {
             value:        UnsafeCell::new(MaybeUninit::new(val)),
-            strong_count: BeginCacheLine(AtomicUsize::new(1)),
-            weak_count:   BeginCacheLine(AtomicUsize::new(1)),
+            strong_count: CacheLine(AtomicUsize::new(1)),
+            weak_count:   CacheLine(AtomicUsize::new(1)),
         };
 
         let layout = Layout::new::<Inner<T>>();
