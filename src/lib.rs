@@ -1,15 +1,23 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)] // if not testing then set no_std
 #![feature(allocator_api)]
 
 pub mod spinlock;
 pub mod arc;
 pub mod lazylock;
 pub mod mutex;
+// pub mod condvar;
+// mod notify;
+// pub mod queue;
+pub mod spsc;
+
+// pub mod stack;
+// pub mod switching_stack;
 
 pub use spinlock::SpinLock;
 pub use arc::{Arc, Weak};
 pub use lazylock::LazyLock;
 pub use mutex::Mutex;
+// pub use condvar::Condvar;
 
 mod futex;
 
@@ -43,3 +51,14 @@ mod os_error {
     }
 
 }
+
+macro_rules! spinloop {
+    ($count:literal) => {{
+        let mut i = 0;
+        while i < $count {
+            i += 1;
+            core::hint::spin_loop();
+        }
+    }}
+}
+pub(crate) use spinloop;

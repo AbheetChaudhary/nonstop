@@ -28,7 +28,7 @@ pub fn wait(word: &AtomicU32, expected: u32) -> Result<(), OsError> {
 /// Return value: 
 /// In case of success, returns the number of threads woken up.
 /// In case of failure, returns `errno`
-pub fn _wake_all(word: &AtomicU32) -> Result<usize, OsError> {
+pub fn wake_all(word: &AtomicU32) -> Result<usize, OsError> {
     let op = libc::FUTEX_WAKE | libc::FUTEX_PRIVATE_FLAG;
 
     let ret = unsafe {
@@ -45,8 +45,9 @@ pub fn _wake_all(word: &AtomicU32) -> Result<usize, OsError> {
 
 /// Wake one of the threads waiting on the futex `word`. It might be any thread.
 ///
-/// Return value: In case of failure, returns `errno`
-pub fn wake_one(word: &AtomicU32) -> Result<(), OsError> {
+/// Return value: In case of failure, returns `errno`, otherwise return number
+/// of threads woken up, which will be either zero or one.
+pub fn wake_one(word: &AtomicU32) -> Result<usize, OsError> {
     let op = libc::FUTEX_WAKE | libc::FUTEX_PRIVATE_FLAG;
 
     let ret = unsafe {
@@ -56,6 +57,6 @@ pub fn wake_one(word: &AtomicU32) -> Result<(), OsError> {
     if ret == -1 {
         Err(os_error::last_os_error())
     } else {
-        Ok(())
+        Ok(ret as usize)
     }
 }

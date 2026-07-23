@@ -173,7 +173,7 @@ impl<T> Mutex<T> {
 ///
 /// - If there are one or more waiters then `A_SWAP + syscall`
 pub struct MutexGuard<'a, T> {
-    inner: &'a Mutex<T>,
+    pub(crate) inner: &'a Mutex<T>,
 }
 
 impl<'a, T> Drop for MutexGuard<'a, T> {
