@@ -7,7 +7,6 @@ pub mod lazylock;
 pub mod mutex;
 // pub mod condvar;
 // mod notify;
-// pub mod queue;
 pub mod spsc;
 
 // pub mod stack;
@@ -21,9 +20,14 @@ pub use mutex::Mutex;
 
 mod futex;
 
-// This only guarantees that it will begin at the beginning of a new cache line,
-// not that it will be the sole element of that cache line. If the type is big
-// enough then it might not even fit in that cache line.
+/// This only guarantees that it will begin at the beginning of a new cache line,
+/// not that it will be the sole element of that cache line. If the type is big
+/// enough then it might not even fit in that cache line.
+///
+/// To ensure that it is the only element in a cacheline, assuming it is small
+/// enough to fit in one, it must be the last field of the struct or should be
+/// followed only by other fields of type `CacheLine<T>`, with `#[repr(C)]` on
+/// the struct.
 #[repr(align(64))]
 struct CacheLine<T>(T);
 
@@ -52,6 +56,7 @@ mod os_error {
 
 }
 
+/// Spin for `$count` number of iterations.
 macro_rules! spinloop {
     ($count:literal) => {{
         let mut i = 0;

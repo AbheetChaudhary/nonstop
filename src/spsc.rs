@@ -38,16 +38,28 @@ use core::{
 /// has caught up with the producer. 
 ///
 /// Basically the producer will only write to an index if the consumer is not
-/// already waiting there.:w
+/// already waiting there.
 #[repr(C)]
 struct InnerFifo<T> {
-    buffer:   NonNull<T>,             // Buffer to store elements.
-    capacity: usize,                  // Power-of-2 capacity of channel.
-    head:     CacheLine<AtomicUsize>, // Number of elements pushed by the producer
-    tail:     CacheLine<AtomicUsize>, // Number of elements popped by the consumer
-    state:    CacheLine<AtomicUsize>, // 2 -> both sides are alive.
-                                      // 1 -> one side got dropped.
-                                      // 0 -> both sides got dropped.
+    // Buffer to store elements.
+    buffer: NonNull<T>,
+
+    // Power-of-2 capacity of channel.
+    capacity: usize,
+
+    // Number of elements pushed by the producer. Masking it with `capacity - 1`
+    // will give the index at which producer should write next element.
+    head: CacheLine<AtomicUsize>,
+
+    // Number of elements popped by the consumer. Masking it with `capacity - 1`
+    // will give the index from which the consumer will read the next value
+    // from.
+    tail: CacheLine<AtomicUsize>,
+
+    // 2 -> both sides are alive.
+    // 1 -> one side got dropped.
+    // 0 -> both sides got dropped.
+    state: CacheLine<AtomicUsize>,
 }
 
 impl<T> Drop for InnerFifo<T> {
@@ -58,15 +70,15 @@ impl<T> Drop for InnerFifo<T> {
         // the right barriers.
         let head = self.head.load(Ordering::Relaxed);
 
-        // Mask head count to get index where next write would have happened.
-        let head_in_buffer = head & cap_mask;
-
         // Relaxed is fine. Whoever called for drop of InnerFifo has already put
         // the right barriers.
         let tail = self.tail.load(Ordering::Relaxed);
 
         // Number of elements to drop.
         let to_drop = head - tail;
+
+        // Mask head count to get index where next write would have happened.
+        let head_in_buffer = head & cap_mask;
 
         // Mask tail count to get index where next element will come from.
         let mut tail_in_buffer = tail & cap_mask;
@@ -75,16 +87,17 @@ impl<T> Drop for InnerFifo<T> {
 
         // Drop individual elements until tail catches with head.
         while tail_in_buffer != head_in_buffer {
-            // SAFETY: Tail has not yet caught up to head so there is an element
-            // to drop, and the addition keeps the pointer within allocation
-            // boundary because it has been masked with the power-of-2 capacity.
+            // SAFETY: Masked tail has not yet caught up to head so there is an
+            // element to drop, and the addition keeps the pointer within
+            // allocation boundary because it has been masked with the
+            // power-of-2 capacity.
             unsafe { self.buffer.add(tail_in_buffer).drop_in_place() };
             drop_count += 1;
 
             tail_in_buffer = (tail_in_buffer + 1) & cap_mask;
         }
 
-        assert_eq!(drop_count, to_drop);
+        debug_assert_eq!(drop_count, to_drop);
 
         // Free the buffer memory.
         let buffer_layout = Layout::array::<T>(self.capacity).unwrap();
@@ -94,15 +107,18 @@ impl<T> Drop for InnerFifo<T> {
     }
 }
 
-/// Create a new FIFO queue which has `cap` inner capacity. `capacity` should be
-/// a power-of-2, if it is not then it will be rounded up.
+/// Create a new FIFO queue which has `cap` inner capacity. `cap` should be
+/// a power-of-2, if it is not then it will be rounded up. A capacity of zero is
+/// rounded up to 1.
 ///
 /// # Panics
 ///
 /// It panics if the capacity(after rounding) does not fit in `usize`.
 pub fn fifo<T>(cap: usize) -> (Producer<T>, Consumer<T>) {
     let capacity = cap.next_power_of_two();
-    assert!(capacity != 0);
+    assert!(capacity != 0, "capacity {} after rounding up to the next power of \
+        2 does not fits in a usize", cap);
+
     let layout = Layout::array::<T>(capacity).expect("too big capacity requested");
 
     let buffer = Global.allocate(layout)
@@ -145,10 +161,10 @@ pub struct Consumer<T> {
     // This ensures the not-Sync nature. Only one thread could consume, that
     // thread might change because this type is Send, but it will still be only
     // one thread.
-    fifo:                NonNull<InnerFifo<T>>,
+    fifo: NonNull<InnerFifo<T>>,
 
     // Both sides cache the capacity of the inner buffer.
-    capacity:            usize,
+    capacity: usize,
 
     // Cached masked value of head count. The consumer will consume until the
     // masked tail count becomes this. Then it will read the updated value and
@@ -167,8 +183,11 @@ unsafe impl<T> Send for Consumer<T> where T: Send {}
 
 impl<T> Drop for Consumer<T> {
     fn drop(&mut self) {
-        if self.inner().state.fetch_sub(1, Ordering::Relaxed) == 1 {
-            // Acquire everything before calling for drop of InnerFifo.
+        // Decrement with Release to publish all the memory operations done on
+        // the consumer side.
+        if self.inner().state.fetch_sub(1, Ordering::Release) == 1 {
+            // The producer has already dropped, acquire and synchronize with
+            // its drop before calling for drop of InnerFifo.
             fence(Ordering::Acquire);
 
             // The producer has already dropped. We need to clean up the
@@ -185,11 +204,24 @@ impl<T> Drop for Consumer<T> {
             let fifo_layout = Layout::new::<InnerFifo<T>>();
 
             // SAFETY: we allocated the heap space for storing one InnerFifo, we
-            // free it.
+            // free it. The buffer owned by the inner fifo has already been
+            // freed in the drop of InnerFifo.
             unsafe { Global.deallocate(self.fifo.cast(), fifo_layout) };
         }
     }
 }
+
+pub enum TryPopError {
+    /// The channel is currently empty.
+    Empty,
+
+    /// The channel has been disconnected, the producer is no longer on the
+    /// other side.
+    Disconnected,
+}
+
+#[derive(Debug)]
+pub struct PopError;
 
 impl<T> Consumer<T> {
     /// Pop an element from the queue. If the queue is currently empty but alive
@@ -197,7 +229,10 @@ impl<T> Consumer<T> {
     /// there is nothing in the queue then it returns `Err`. If there is
     /// something in the queue, even if the producer has already dropped, it
     /// returns the elements in the queue.
-    pub fn pop(&self) -> Result<T, ()> {
+    ///
+    /// If the producer neither pushes anything and neither closes the channel
+    /// then this will stay blocked.
+    pub fn pop(&self) -> Result<T, PopError> {
         let cap_mask = self.capacity() - 1;
 
         let tail = self.inner().tail.load(Ordering::Relaxed);
@@ -236,9 +271,11 @@ impl<T> Consumer<T> {
                     // The queue is already closed, if it is empty as well then
                     // return Err
                     if head == tail {
-                        return Err(());
+                        return Err(PopError);
                     }
                 }
+
+                // println!("producer too slow: {:?}", std::thread::current().id());
             }
         }
         // The producer has pushed something, synchronize with the release of
@@ -264,6 +301,102 @@ impl<T> Consumer<T> {
         self.inner().tail.fetch_add(1, Ordering::Release);
 
         Ok(elem)
+    }
+
+    /// Tries to pop an element from the queue if there is one. If there is
+    /// nothing then returns `Err`.
+    ///
+    /// The error indicates whether the queue is just empty, in that case retry
+    /// again after some time, or whether the queue is empty and disconnected
+    /// in which case there is no point in retrying.
+    pub fn try_pop(&self) -> Result<T, TryPopError> {
+        // Ok(T) when:
+        // - The queue has some elements that we can read without updating our
+        //   cached producer idx.
+        // - The queue has some elements but we have an old cached producer
+        //   index that we need to update.
+        //
+        // Err(TryPopError) when:
+        // - We have updated our producer cache index but there are still no new
+        //   elements in the queue. Maybe the queue is discontinued or it is 
+        //   just empty. Double check before concluding the queue is
+        //   discontinued.
+
+        let cap_mask = self.capacity() - 1;
+
+        let tail = self.inner().tail.load(Ordering::Relaxed);
+
+        // Masked tail count.
+        let idx_in_buffer = tail & cap_mask;
+
+        // Fast path!
+        if idx_in_buffer < self.cached_producer_idx.load(Ordering::Relaxed) {
+            fence(Ordering::Acquire);
+
+            let elem = unsafe {
+                let ptr = self.inner().buffer.add(idx_in_buffer);
+                ptr.read()
+            };
+
+            self.inner().tail.fetch_add(1, Ordering::Release);
+
+            return Ok(elem)
+        }
+
+        // Update our cached index and try again.
+        let current_head = self.inner().head.load(Ordering::Relaxed);
+
+        // If the producer has pushed new elements.
+        if idx_in_buffer != current_head & cap_mask {
+            fence(Ordering::Acquire);
+
+            let elem = unsafe {
+                let ptr = self.inner().buffer.add(idx_in_buffer);
+                ptr.read()
+            };
+
+            self.inner().tail.fetch_add(1, Ordering::Release);
+
+            // Update our cached producer index.
+            self.cached_producer_idx.store(current_head & cap_mask,
+                Ordering::Relaxed);
+
+            return Ok(elem)
+        }
+
+        // Now there is a real possibility that the queue is either empty or
+        // disconnected.
+        if self.queue_is_closed() {
+            // Double check whether the producer has not pushed anything since
+            // our last two checks.
+
+            let current_head = self.inner().head.load(Ordering::Relaxed);
+
+            if idx_in_buffer != current_head & cap_mask {
+                fence(Ordering::Acquire);
+                
+                // The producer has pushed something and closed the channel
+                // since we last checked above.
+
+                let elem = unsafe {
+                    let ptr = self.inner().buffer.add(idx_in_buffer);
+                    ptr.read()
+                };
+
+                self.inner().tail.fetch_add(1, Ordering::Release);
+
+                // Update our cached producer index.
+                self.cached_producer_idx.store(current_head & cap_mask,
+                    Ordering::Relaxed);
+
+                return Ok(elem)
+            }
+
+            // The queue is truly empty and disconnected.
+            return Err(TryPopError::Disconnected)
+        }
+
+        Err(TryPopError::Empty)
     }
 
     /// Checks whether the other side is alive. Even if the queue is not open,
@@ -298,10 +431,10 @@ pub struct Producer<T> {
     // This ensures the not-Sync nature. Only one thread could produce, that
     // thread might change because this type is Send, but it will still be only
     // one thread.
-    fifo:                NonNull<InnerFifo<T>>,
+    fifo: NonNull<InnerFifo<T>>,
 
     // Both sides cache the capacity of the inner buffer.
-    capacity:            usize,
+    capacity: usize,
 
     // Cached masked value of tail count. The producer will push until the
     // masked value of the head count after pushing will be equal to this. If
@@ -321,8 +454,11 @@ unsafe impl<T> Send for Producer<T> where T: Send {}
 
 impl<T> Drop for Producer<T> {
     fn drop(&mut self) {
-        if self.inner().state.fetch_sub(1, Ordering::Relaxed) == 1 {
-            // Acquire everything before calling for drop of InnerFifo.
+        // Decrement with Release to publish all the memory operations done on
+        // the producer side.
+        if self.inner().state.fetch_sub(1, Ordering::Release) == 1 {
+            // Synchronize with the release decrement of state done on the
+            // consumer side before calling for drop of InnerFifo.
             fence(Ordering::Acquire);
 
             // The consumer has already dropped. We need to clean up the
@@ -345,13 +481,16 @@ impl<T> Drop for Producer<T> {
     }
 }
 
+#[derive(Debug)]
+pub struct PushError<T>(T);
+
 impl<T> Producer<T> {
     /// Push an element to the queue if it is still open. If the queue is not
     /// open then return the element back.
-    pub fn push(&self, val: T) -> Result<(), T> {
+    pub fn push(&self, val: T) -> Result<(), PushError<T>> {
         // Check whether the queue is open.
         if self.queue_is_closed() {
-            return Err(val);
+            return Err(PushError(val));
         }
 
         // The queue might close after checking but before pushing, so we may
@@ -379,7 +518,7 @@ impl<T> Producer<T> {
                 // If the queue is closed then we skip pushing even if the
                 // masked tail index has moved forward.
                 if self.queue_is_closed() {
-                    return Err(val);
+                    return Err(PushError(val));
                 }
 
                 // Latest tail count.

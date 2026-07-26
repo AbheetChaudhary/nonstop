@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use crate::os_error::{self, OsError};
 
 use core::sync::atomic::AtomicU32;
