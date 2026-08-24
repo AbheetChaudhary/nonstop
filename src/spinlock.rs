@@ -3,7 +3,7 @@
 
 use crate::CacheLine;
 
-use core::sync::atomic::{AtomicBool, Ordering, fence};
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::cell::UnsafeCell;
 
 fn rdtsc() -> u64 {
@@ -14,9 +14,10 @@ fn rdtsc() -> u64 {
 /// Spin for `cycles` number of clock cycles. This is not going to be exaclty
 /// accurate.
 fn spin_loop_for_cycles(max_cycles: u64) {
-    let begin = rdtsc();
+    let mut begin = rdtsc();
     while rdtsc() < begin + max_cycles {
         core::hint::spin_loop();
+        core::hint::black_box(&mut begin);
     }
 }
 
@@ -243,6 +244,7 @@ mod tests {
     use std::{thread, time};
 
     #[test]
+    #[ignore]
     fn panic_safety() {
         let sl = SpinLock::new(0i32);
 

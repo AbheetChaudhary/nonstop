@@ -7,6 +7,8 @@ Currently available(Linux only):
 - [x] `LazyLock` (thread safe lazy initialization primitive)
 - [x] `Mutex` (guarding exclusive access, without spinning)
 - [x] `spsc::fifo` (Lockfree single-producer, single-consumer FIFO queue)
+- [x] `Condvar` (Condition variables)
+- [x] `StackPool` (Treiber stack based MPSC pool)
 - [ ] Hazard Pointer (thread safe memory reclamation)
 - [ ] Epoch based concurrent memory reclamation
 - [ ] Concurrent linked lists and queues.
@@ -21,6 +23,11 @@ To generate HTML docs, run:
 cargo doc
 ```
 Then open the HTML file in your browser.
+
+## References
+- [Rust Atomics and Locks by Mara Bos](https://mara.nl/atomics/)
+- [Futexes Are Tricky - Ulrich Drepper](https://cis.temple.edu/~giorgio/cis307/readings/futex.pdf)
+- [Erik Rigtorp's Blog](https://rigtorp.se/)
 
 ## NOTE
 This repository is only for learning purposes, for any high stakes program

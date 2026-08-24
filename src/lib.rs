@@ -5,18 +5,25 @@ pub mod spinlock;
 pub mod arc;
 pub mod lazylock;
 pub mod mutex;
-// pub mod condvar;
-// mod notify;
+pub mod condvar;
 pub mod spsc;
 
-// pub mod stack;
-// pub mod switching_stack;
+pub mod stackpool;
 
+#[doc(hidden)]
 pub use spinlock::SpinLock;
+
+#[doc(hidden)]
 pub use arc::{Arc, Weak};
+
+#[doc(hidden)]
 pub use lazylock::LazyLock;
+
+#[doc(hidden)]
 pub use mutex::Mutex;
-// pub use condvar::Condvar;
+
+#[doc(hidden)]
+pub use condvar::Condvar;
 
 mod futex;
 

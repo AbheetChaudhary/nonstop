@@ -304,7 +304,8 @@ impl<T> Consumer<T> {
     }
 
     /// Tries to pop an element from the queue if there is one. If there is
-    /// nothing then returns `Err`.
+    /// nothing then returns `Err`. This function does not enters a loop of
+    /// retrying thus it does not blocks.
     ///
     /// The error indicates whether the queue is just empty, in that case retry
     /// again after some time, or whether the queue is empty and disconnected
