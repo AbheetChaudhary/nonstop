@@ -9,6 +9,7 @@ Currently available(Linux only):
 - [x] `spsc::fifo` (Lockfree single-producer, single-consumer FIFO queue)
 - [x] `Condvar` (Condition variables)
 - [x] `StackPool` (Treiber stack based MPSC pool)
+- [x] `LeftRightPool` (A better `StackPool`, optimized for batched reads)
 - [ ] Hazard Pointer (thread safe memory reclamation)
 - [ ] Epoch based concurrent memory reclamation
 - [ ] Concurrent linked lists and queues.

@@ -9,6 +9,7 @@ pub mod condvar;
 pub mod spsc;
 
 pub mod stackpool;
+pub mod leftrightpool;
 
 #[doc(hidden)]
 pub use spinlock::SpinLock;
