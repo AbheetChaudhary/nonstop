@@ -29,7 +29,22 @@ Then open the HTML file in your browser.
 - [Rust Atomics and Locks by Mara Bos](https://mara.nl/atomics/)
 - [Futexes Are Tricky - Ulrich Drepper](https://cis.temple.edu/~giorgio/cis307/readings/futex.pdf)
 - [Erik Rigtorp's Blog](https://rigtorp.se/)
+- Some CPPCON talks related to lockfree data structures.
 
 ## NOTE
 This repository is only for learning purposes, for any high stakes program
 please use other well established crates in the ecosystem.
+
+## LLM Usage Disclosure
+
+**For writing code or designing data structures:**
+
+_None._
+
+...better resource were used for this. See references above.
+
+**For debugging:**
+
+_Some usage._
+
+...like using it to quickly find subtle off by one like errors.
